@@ -13,6 +13,8 @@ import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
 import IO hiding (try)
 import Test.HUnit
+import Criterion
+import Criterion.Main
 
 import Debug.Trace
 
@@ -393,7 +395,6 @@ evalString expr = return $ eval' expr
 evalAndPrint :: String -> IO ()
 evalAndPrint expr = evalString expr >>= putStrLn
 
---until_ :: Monad m => (a -> Bool) -> m a -> (
 until_ pred prompt action = do
   result <- prompt
   if pred result
@@ -406,7 +407,14 @@ runRepl :: IO ()
 runRepl = until_ (== "quit") (readPrompt "SECD>>> ") evalAndPrint
 
 main :: IO ()
-main = do runRepl
+main = runRepl
+
+----------------------------------------------------------------
+-- Criterion
+----------------------------------------------------------------
+firstN :: Int -> [Int]
+firstN k = take k [(0 :: Int) ..]
+
 
 ----------------------------------------------------------------
 -- HUnit Test
