@@ -356,45 +356,10 @@ transit (SECD ((_ :. _) :. s) e (ATOM :. c) d) = SECD (Bool True :. s) e c d
 transit (SECD (_ :. s) e (ATOM :. c) d) = SECD (Bool False :. s) e c d
 -- Recursion
 transit (SECD s e (DUM :. c) d) = SECD s (OMEGA :. e) c d
--- transit ((c' :. (OMEGA :. e')) :. v :. s, OMEGA :. e, RAP :. c, d) =
---     (Nil, gencirc (OMEGA :. e') v,  c', s :. e :. c :. d)
 transit (SECD ((c' :. (OMEGA :. e')) :. v :. s) (OMEGA :. e) (RAP :. c) d) =
     SECD Nil (gencirc (OMEGA :. e') v)  c' (s :. e :. c :. d)
 -- Base case
 transit (SECD s e c d) = error (show (car c))
-
--- transit :: SECD -> SECD
-
--- transit (s, e, LDC x :. c, d) = (x :. s, e, c, d)
--- transit (s, e, NIL :. c, d) = (Nil :. s, e, c, d)
--- -- Ptimitive
--- transit (Number a :. Number b :. s, e, OP "=" :. c, d) = (Bool (a == b) :. s, e, c, d)
--- transit (Number a :. Number b :. s, e, OP "+" :. c, d) = (Number (a + b) :. s, e, c, d)
--- transit (Number a :. Number b :. s, e, OP "-" :. c, d) = (Number (a - b) :. s, e, c, d)
--- transit (Number a :. Number b :. s, e, OP "*" :. c, d) = (Number (a * b) :. s, e, c, d)
--- transit (Number a :. Number b :. s, e, OP ">" :. c, d) = (Bool (a > b) :. s, e, c, d)
--- transit (Number a :. Number b :. s, e, OP "<" :. c, d) = (Bool (a < b) :. s, e, c, d)
--- -- Conditionals
--- transit (Bool True :. s, e, SEL :. ct :. _ :. c, d) = (s, e, ct, c :. d)
--- transit (Bool False :. s, e, SEL :. _ :. cf :. c, d) = (s, e, cf, c :. d)
--- transit (s, e, JOIN :. _, c :. d) = (s, e, c, d)
--- -- Procedure call
--- transit (s, e, LDF f :. c, d) =  ((f :. e) :. s, e, c, d)
--- transit ((c' :. e') :. v :. s, e, AP :. c, d) = (Nil, v :. e', c', s :. e :. c :. d)
--- transit (x :. _, e', RTN :. _, s :. e :. c :. d) = (x :. s, e, c, d)
--- transit (s, e, LD (i, j) :. c, d) = (locate (i,j) e :. s, e, c, d)
--- -- Cons
--- transit (a :. b :. s, e, CONS :. c, d) = ((a :. b) :. s, e, c, d)
--- transit (a :. _ :. s, e, CAR :. c, d) = (a :. s, e, c, d)
--- transit (_ :. b :. s, e, CDR :. c, d) = (b :. s, e, c, d)
--- transit ((_ :. _) :. s, e, ATOM :. c, d) = (Bool True :. s, e, c, d)
--- transit (_ :. s, e, ATOM :. c, d) = (Bool False :. s, e, c, d)
--- -- Recursion
--- transit (s, e, DUM :. c, d) = (s, OMEGA :. e, c, d)
--- transit ((c' :. (OMEGA :. e')) :. v :. s, OMEGA :. e, RAP :. c, d) =
---     (Nil, gencirc (OMEGA :. e') v,  c', s :. e :. c :. d)
--- -- Base case
--- transit (s,e,c,d) = error (show (car c))
 
 gencirc e' v = mapcar f v :. gencirc e' v
     where
