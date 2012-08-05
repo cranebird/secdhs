@@ -318,16 +318,9 @@ lispNth i x = lispNth (i-1) (cdr x)
 locate (i,j) e = lispNth j (lispNth i e)
 
 -- The SECD virtual machine
--- type SECD = (
---              LispVal, -- Stack
---              LispVal, -- Environment
---              LispVal, -- Code
---              LispVal  -- Dump
---             )
 data SECD = SECD LispVal LispVal LispVal LispVal deriving (Eq, Show)
 
 -- State transition
-
 transit :: SECD -> SECD
 
 transit (SECD s e (LDC x :. c) d) = SECD (x :. s) e c d
