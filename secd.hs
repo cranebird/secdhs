@@ -213,6 +213,10 @@ readExpr input = case parse parseExpr "lisp" input of
                    Left err -> String $ "No match: " ++ show err
                    Right val -> val
 
+-- fixme
+instance Read LispVal where
+    readsPrec n str = [(readExpr str, "")]
+
 ----------------------------------------------------------------
 -- Compiler
 ----------------------------------------------------------------
@@ -282,6 +286,7 @@ comp' (Atom "lambda" :. plist :. body :. Nil) env c = LDF (compBody body (RTN :.
 -- let
 -- (let ((x x0)) body) => ((lambda (x) body) x0)
 -- (let ((x x0) (y y0)) body) => ((lambda (x y) body) x0 y0)
+-- fixme; compile directory
 comp' (Atom "let" :. bindings :. body) env c =
     comp' ((Atom "lambda" :. mapcar car bindings :. body) :. 
            mapcar (car . cdr) bindings) env c
@@ -318,7 +323,12 @@ lispNth i x = lispNth (i-1) (cdr x)
 locate (i,j) e = lispNth j (lispNth i e)
 
 -- The SECD virtual machine
-data SECD = SECD LispVal LispVal LispVal LispVal deriving (Eq, Show)
+data SECD = SECD 
+            LispVal -- Stack
+            LispVal -- Environment
+            LispVal -- Code
+            LispVal -- Dump
+            deriving (Eq, Show)
 
 -- State transition
 transit :: SECD -> SECD
@@ -376,7 +386,7 @@ eval expr = showLispVal $ car s
       SECD s e c d = exec (comp expr)
 
 eval' :: String -> String
-eval' = eval . readExpr
+eval' = eval . read
 
 -- Simple REPL
 -- See "Write Yourself a Scheme in 48 Hours"
@@ -409,13 +419,13 @@ main = runRepl
 ----------------------------------------------------------------
 -- Criterion
 ----------------------------------------------------------------
-firstN :: Int -> [Int]
-firstN k = take k [(0 :: Int) ..]
+-- firstN :: Int -> [Int]
+-- firstN k = take k [(0 :: Int) ..]
 
-fib :: Int -> Int
-fib 0 = 0
-fib 1 = 1
-fib n = fib (n - 1) + fib (n - 2)
+-- fib :: Int -> Int
+-- fib 0 = 0
+-- fib 1 = 1
+-- fib n = fib (n - 1) + fib (n - 2)
 
 -- defaultMain [ bench "fib" $ nf eval' "(letrec ((fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))) (fib 20))" ]
 -- defaultMain [ bench "fibhask" $ nf fib 20 ]
