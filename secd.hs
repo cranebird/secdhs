@@ -75,19 +75,15 @@ consp :: LispVal -> Bool
 consp (_ :. _) = True
 consp _ = False
 
+cons :: LispVal -> LispVal -> LispVal 
+cons = (:.)
 car :: LispVal -> LispVal
 car (a :. _) = a
 car x = error ("car Not cons: " ++ show x)
 cdr :: LispVal -> LispVal
 cdr (_ :. a) = a
 cdr x = error ("cdr Not cons: " ++ show x)
-cons :: LispVal -> LispVal -> LispVal 
-cons = (:.)
-
-reverseList lst = reverseList' lst Nil
-    where
-      reverseList' (a :. Nil) acc = a :. acc
-      reverseList' (a :. b) acc = reverseList' b (a :. acc)
+cadr = car . cdr
 
 mapcar f lst = mapcar' f lst Nil
     where
@@ -103,9 +99,6 @@ isProperList Nil = True
 isProperList (x :. Nil) = True
 isProperList ((:.) x y) = isProperList y
 isProperList _ = False
-
--- (.) = cons
--- infixr 0 .
 
 -- show cons cell; see HyperSpec "22.1.3.5 Printing Lists And Conses"
 showCons x = step1 x ""
@@ -289,7 +282,7 @@ comp' (Atom "lambda" :. plist :. body :. Nil) env c = LDF (compBody body (RTN :.
 -- fixme; compile directory
 comp' (Atom "let" :. bindings :. body) env c =
     comp' ((Atom "lambda" :. mapcar car bindings :. body) :. 
-           mapcar (car . cdr) bindings) env c
+           mapcar cadr bindings) env c
 
 -- (letrec ((x x0)
 --          (y y0))
@@ -302,7 +295,7 @@ comp' (Atom "letrec" :. bindings :. body) env c =
       plistToList Nil acc = acc
       plistToList (x :. xs) acc = plistToList xs (x:acc)
       vars = mapcar car bindings
-      inits = mapcar (car . cdr) bindings
+      inits = mapcar cadr bindings
       newenv = zip (reverse $ plistToList vars []) [1..] : env
       genargs' Nil cc = cc
       genargs' (e :. es) cc = genargs' es (comp' e newenv (CONS :. cc))
