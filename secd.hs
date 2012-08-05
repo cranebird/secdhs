@@ -325,6 +325,71 @@ type SECD = (
              LispVal  -- Dump
             )
 -- State transition
+
+-- transit' (s, e, op :. c, d) =
+--     case op of
+--       LDC x -> (x :. s, e, c, d)
+--       NIL -> (Nil :. s, e, c, d)
+--       OP "=" -> f (s, e, op :. c, d)
+--           where
+--             f (Number a :. Number b :. s, _, _, _) = (Bool (a == b) :. s, e, c, d)
+--       OP "+" -> f (s, e, op :. c, d)
+--           where
+--             f (Number a :. Number b :. s, _, _, _) = (Number (a + b) :. s, e, c, d)
+--       OP "-" -> f (s, e, op :. c, d)
+--           where
+--             f (Number a :. Number b :. s, _, _, _) = (Number (a - b) :. s, e, c, d)
+--       OP "*" -> f (s, e, op :. c, d)
+--           where
+--             f (Number a :. Number b :. s, _, _, _) = (Number (a * b) :. s, e, c, d)
+--       OP ">" -> f (s, e, op :. c, d)
+--           where
+--             f (Number a :. Number b :. s, _, _, _) = (Bool (a > b) :. s, e, c, d)
+--       OP "<" -> f (s, e, op :. c, d)
+--           where
+--             f (Number a :. Number b :. s, _, _, _) = (Bool (a < b) :. s, e, c, d)
+--       SEL -> f (s, e, op :. c, d)
+--           where
+--             f (Bool True :. s, e, SEL :. ct :. _ :. c, d) = (s, e, ct, c :. d)
+--             f (Bool False :. s, e, SEL :. _ :. cf :. c, d) = (s, e, cf, c :. d)
+--       JOIN -> f (s, e, op :. c, d)
+--           where
+--             f (s, e, JOIN :. _, c :. d) = (s, e, c, d)
+--       LDF f -> ((f :. e) :. s, e, c, d)
+--       AP -> f (s, e, op :. c, d)
+--           where
+--             f ((c' :. e') :. v :. s, e, AP :. c, d) = (Nil, v :. e', c', s :. e :. c :. d)
+--       RTN -> f (s, e, op :. c, d)
+--           where
+--             f (x :. _, e', RTN :. _, s :. e :. c :. d) = (x :. s, e, c, d)
+--       LD (i, j) -> f (s, e, op :. c, d)
+--           where
+--             f (s, e, LD (i, j) :. c, d) = (locate (i,j) e :. s, e, c, d)
+--       CONS -> f (s, e, op :. c, d)
+--           where
+--             f (a :. b :. s, e, CONS :. c, d) = ((a :. b) :. s, e, c, d)
+--       CAR -> f (s, e, op :. c, d)
+--           where
+--             f (a :. _ :. s, e, CAR :. c, d) = (a :. s, e, c, d)
+--       CDR -> f (s, e, op :. c, d)
+--           where
+--             f (_ :. b :. s, e, CDR :. c, d) = (b :. s, e, c, d)
+--       ATOM -> f (s, e, op :. c, d)
+--           where
+--             f ((_ :. _) :. s, e, ATOM :. c, d) = (Bool True :. s, e, c, d)
+--             f (_ :. s, e, ATOM :. c, d) = (Bool False :. s, e, c, d)
+--       DUM -> f (s, e, op :. c, d)
+--           where
+--             f (s, e, DUM :. c, d) = (s, OMEGA :. e, c, d)
+--       RAP -> f (s, e, op :. c, d)
+--           where 
+--             f ((c' :. (OMEGA :. e')) :. v :. s, OMEGA :. e, RAP :. c, d) =
+--                 (Nil, gencirc (OMEGA :. e') v,  c', s :. e :. c :. d)
+--       STOP -> (s, e, STOP :. c, d)
+--       _ -> error ("basecase: " ++ show(c))
+
+--transit' (s, e, c, d) = error ("basecase: " ++ show(car c))
+
 transit :: SECD -> SECD
 transit (s, e, LDC x :. c, d) = (x :. s, e, c, d)
 transit (s, e, NIL :. c, d) = (Nil :. s, e, c, d)
