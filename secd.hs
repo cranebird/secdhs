@@ -45,7 +45,7 @@ data LispVal = Atom String
              | String String
              | Bool Bool
              | LispVal :. LispVal -- Cons
-             | Nil
+             | Nil -- Value Nil
              | NIL -- Instruction NIL
              | LDC LispVal
              | LD (Level, Nth)
@@ -63,6 +63,9 @@ data LispVal = Atom String
              | RAP
              | OMEGA
              | OP String -- BuiltIn Operator
+             | TAP -- Tail apply
+             | LDCT LispVal -- continuation
+             | CONT LispVal
                deriving (Eq, Show)
 
 infixr 0 :.
@@ -136,6 +139,8 @@ showLispVal AP = "AP"
 showLispVal RTN = "RTN"
 showLispVal CONS = "CONS"
 showLispVal (LD (l, n)) = "LD " ++ show (l, n)
+showLispVal (LDCT x) = "LDCT " ++ showLispVal x
+showLispVal (CONT x) = "CONT " ++ showLispVal x
 showLispVal x = show x
 
 -- Parse S-Expression
@@ -260,6 +265,12 @@ comp' (Atom x) e c = LD location :. c
                    Nothing -> error ("var " ++ x ++ " not found")
 -- quote
 comp' (Atom "quote" :. x :. Nil) env c = LDC x :. c
+-- cons
+comp' (Atom "cons" :. x :. y :. Nil) env c = 
+    comp' y env (comp' x env (CONS :. c))
+comp' (Atom "car" :. x :. Nil) env c = comp' x env (CAR :. c)
+comp' (Atom "cdr" :. x :. Nil) env c = comp' x env (CDR :. c)
+
 -- Builtin operator
 comp' (Atom op :. x :. y :. Nil) env c | isBuiltin op =
     comp' y env (comp' x env (OP op :. c))
@@ -299,6 +310,11 @@ comp' (Atom "letrec" :. bindings :. body) env c =
       newenv = zip (reverse $ plistToList vars []) [1..] : env
       genargs' Nil cc = cc
       genargs' (e :. es) cc = genargs' es (comp' e newenv (CONS :. cc))
+-- call/cc
+-- comp' (Atom "call/cc" :. proc :. Nil) env (RTN :. Nil) =
+--     LDCT :. (RTN :. Nil) :. (comp' proc env (TAP :. Nil))
+comp' (Atom "call/cc" :. proc :. Nil) env c =
+    LDCT c :. (comp' proc env (AP :. c))
 
 -- procedure call
 -- (f) => NIL f' AP
@@ -309,6 +325,15 @@ comp' (f :. es) env c
       args2cons Nil c = c
       args2cons (e :. Nil) c = comp' e env (CONS :. c)
       args2cons es c = args2cons (cdr es) (comp' (car es) env (CONS :. c))
+
+-- now optimize tail call; ugly
+opt :: LispVal -> LispVal
+opt Nil = Nil
+opt (AP :. RTN :. x) = TAP :. (opt x)
+opt (LDF f :. x) = LDF (opt f) :. (opt x)
+opt (LDC x :. y) = LDC (opt x) :. (opt y)
+opt (a :. b) = opt a :. opt b
+opt x = x
 
 -- util
 lispNth 1 x = car x
@@ -339,23 +364,40 @@ transit (SECD (Number a :. Number b :. s) e (OP "<" :. c) d) = SECD (Bool (a < b
 transit (SECD (Bool True :. s) e (SEL :. ct :. _ :. c) d) = SECD s e ct (c :. d)
 transit (SECD (Bool False :. s) e (SEL :. _ :. cf :. c) d) = SECD s e cf (c :. d)
 transit (SECD s e (JOIN :. _) (c :. d)) = SECD s e c d
--- Procedure call
-transit (SECD s e (LDF f :. c) d) = SECD ((f :. e) :. s) e c d
-transit (SECD ((c' :. e') :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
+
 transit (SECD (x :. _) e' (RTN :. _) (s :. e :. c :. d)) = SECD (x :. s) e c d
 transit (SECD s e (LD (i, j) :. c) d) = SECD (locate (i, j) e :. s) e c d
 -- Cons
 transit (SECD (a :. b :. s) e (CONS :. c) d) = SECD ((a :. b) :. s) e c d
-transit (SECD (a :. _ :. s) e (CAR :. c) d) = SECD (a :. s) e c d
-transit (SECD (_ :. b :. s) e (CDR :. c) d) = SECD (b :. s) e c d
+transit (SECD ((a :. _) :. s) e (CAR :. c) d) = SECD (a :. s) e c d
+transit (SECD ((_ :. b) :. s) e (CDR :. c) d) = SECD (b :. s) e c d
 transit (SECD ((_ :. _) :. s) e (ATOM :. c) d) = SECD (Bool True :. s) e c d
 transit (SECD (_ :. s) e (ATOM :. c) d) = SECD (Bool False :. s) e c d
 -- Recursion
 transit (SECD s e (DUM :. c) d) = SECD s (OMEGA :. e) c d
 transit (SECD ((c' :. (OMEGA :. e')) :. v :. s) (OMEGA :. e) (RAP :. c) d) =
     SECD Nil (gencirc (OMEGA :. e') v)  c' (s :. e :. c :. d)
+-- Continuation
+--   ( s e (:LDCT |c'| . c) d                      -> ( ((:cont s e |c'| . d)) . s) e c d )
+-- ( ((:cont s e c . d) (v) . |s'|) |e'| (:AP . |c'|) |d'| -> (v . s) e c d)
+
+-- pass, but AP fails
+-- transit (SECD s e (LDCT c' :. c) d) = SECD (((s :. e :. c' :. d) :. Nil) :. s) e c d
+-- transit (SECD (((s :. e :. c :. d)) :. (v :. Nil) :. s') e' (AP :. c') d') =
+--     SECD (v :. s) e c d
+
+transit (SECD s e (LDCT c' :. c) d) = SECD (((CONT s :. e :. c' :. d) :. Nil) :. s) e c d
+transit (SECD (((CONT s :. e :. c :. d)) :. (v :. Nil) :. s') e' (AP :. c') d') =
+    SECD (v :. s) e c d
+
+transit (SECD ((c' :. e') :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
+
+-- Procedure call
+transit (SECD s e (LDF f :. c) d) = SECD ((f :. e) :. s) e c d
+transit (SECD ((c' :. e') :. v :. s) e (TAP :. c) d) = SECD s (v :. e') c' d
+
 -- Base case
-transit (SECD s e c d) = error (show (car c))
+transit (SECD s e c d) = error ("transit base case: " ++ show (car c))
 
 gencirc e' v = mapcar f v :. gencirc e' v
     where
@@ -364,8 +406,11 @@ gencirc e' v = mapcar f v :. gencirc e' v
 
 -- for debug
 -- Be care to use for circular structure.
--- transit' (s, e, c, d) = trace ("S:"++show s ++"\nE:" ++show e ++ "\nC:" ++ show c ++ "\nD:" ++ show d)
---                         $ transit (s,e,c,d)
+transit' (SECD s e c d) = trace ("S:"++ showLispVal s ++ 
+                                 "\nE:" ++ showLispVal e ++
+                                 "\nC:" ++ showLispVal c ++
+                                 "\nD:" ++ showLispVal d)
+                        $ transit (SECD s e c d)
 
 exec c = iter (SECD (Atom "s") (Atom "e") c (Atom "d"))
     where
@@ -376,6 +421,7 @@ exec c = iter (SECD (Atom "s") (Atom "e") c (Atom "d"))
 eval :: LispVal -> String
 eval expr = showLispVal $ car s
     where
+      -- SECD s e c d = exec (opt (comp expr))
       SECD s e c d = exec (comp expr)
 
 eval' :: String -> String
@@ -482,7 +528,13 @@ testeval = test [
             "lr1" ~: "letrec10" ~: "4" ~=? eval' "(letrec ((f (lambda (x) g)) (g 4)) (f 12))",
             "fa1" ~: "fact1" ~: "3628800" ~=? eval' "(letrec ((fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1)))))))  (fact 10))",
             "fa1" ~: "fact2" ~: "3628800" ~=? eval' "(letrec ((fact (lambda (n res) (if (= n 0) res (fact (- n 1) (* n res)))))) (fact 10 1))",
-            "fib" ~: "fib1" ~: "6765" ~=? eval' "(letrec ((fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))) (fib 20))"
+            "fib" ~: "fib1" ~: "6765" ~=? eval' "(letrec ((fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))) (fib 20))",
+            "cont" ~: "call/cc-1" ~: "8" ~=? eval' "((lambda (n) (call/cc (lambda (c) 8))) 13)",
+            "cont" ~: "call/cc-2" ~: "15" ~=? eval' "((lambda (n) (+ n (call/cc (lambda (c) (c 2))))) 13)",
+            "cont" ~: "call/cc-3" ~: "2" ~=? eval' "((lambda (n) (call/cc (lambda (c) (+ n (c 2))))) 13)",
+            "cont" ~: "call/cc-4" ~: "9" ~=? eval' "(* 3 (call/cc (lambda (k) (+ 1 2))))",
+            "cont" ~: "call/cc-5" ~: "6" ~=? eval' "(* 3 (call/cc (lambda (k) (+ 1 (k 2)))))"
+
            ]
 
 tests = test [
