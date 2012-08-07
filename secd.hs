@@ -380,8 +380,6 @@ transit (SECD s e (DUM :. c) d) = SECD s (OMEGA :. e) c d
 transit (SECD ((c' :. (OMEGA :. e')) :. v :. s) (OMEGA :. e) (RAP :. c) d) =
     SECD Nil (gencirc (OMEGA :. e') v)  c' (s :. e :. c :. d)
 
--- transit m@(SECD ((CLOS (c' :. (OMEGA :. e'))) :. v :. s) (OMEGA :. e) (RAP :. c) d) = 
---     SECD Nil (gencirc (OMEGA :. e') v) c' (s :. e :. c :. d)
 transit m@(SECD (CLOS c' (OMEGA :. e') :. v :. s) (OMEGA :. e) (RAP :. c) d) = 
     SECD Nil (gencirc (OMEGA :. e') v) c' (s :. e :. c :. d)
 
@@ -391,8 +389,6 @@ transit (SECD s e (LDCT c' :. c) d) = SECD ((CONT (s :. e :. c' :. d) :. Nil) :.
 transit (SECD (CONT (s :. e :. c :. d) :. (v :. Nil) :. s') e' (AP :. c') d') = SECD (v :. s) e c d
 
 -- Procedure call
--- transit (SECD s e (LDF f :. c) d) = SECD ((CLOS (f :. e)) :. s) e c d
--- transit (SECD ((CLOS (c' :. e')) :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
 transit (SECD s e (LDF f :. c) d) = SECD (CLOS f e :. s) e c d
 transit (SECD (CLOS c' e' :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
 
@@ -405,10 +401,6 @@ gencirc e' v = mapcar f v :. gencirc e' v
     where
       f (CLOS f (OMEGA :. e)) = CLOS f (gencirc e' v)
       f x = x
--- gencirc e' v = mapcar f v :. gencirc e' v
---     where
---       f (CLOS (f :. (OMEGA :. e))) = CLOS (f :. gencirc e' v)
---       f x = x
 
 -- for debug
 -- Be care to use for circular structure.
