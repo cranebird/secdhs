@@ -314,8 +314,7 @@ comp' (Atom "letrec" :. bindings :. body) env c =
 -- call/cc
 -- comp' (Atom "call/cc" :. proc :. Nil) env (RTN :. Nil) =
 --     LDCT :. (RTN :. Nil) :. (comp' proc env (TAP :. Nil))
-comp' (Atom "call/cc" :. proc :. Nil) env c =
-    LDCT c :. comp' proc env (AP :. c)
+comp' (Atom "call/cc" :. proc :. Nil) env c = LDCT c :. comp' proc env (AP :. c)
 
 -- procedure call
 -- (f) => NIL f' AP
@@ -368,41 +367,30 @@ transit (SECD s e (JOIN :. _) (c :. d)) = SECD s e c d
 
 transit (SECD (x :. _) e' (RTN :. _) (s :. e :. c :. d)) = SECD (x :. s) e c d
 transit (SECD s e (LD (i, j) :. c) d) = SECD (locate (i, j) e :. s) e c d
+
 -- Cons
 transit (SECD (a :. b :. s) e (CONS :. c) d) = SECD ((a :. b) :. s) e c d
 transit (SECD ((a :. _) :. s) e (CAR :. c) d) = SECD (a :. s) e c d
 transit (SECD ((_ :. b) :. s) e (CDR :. c) d) = SECD (b :. s) e c d
 transit (SECD ((_ :. _) :. s) e (ATOM :. c) d) = SECD (Bool True :. s) e c d
 transit (SECD (_ :. s) e (ATOM :. c) d) = SECD (Bool False :. s) e c d
+
 -- Recursion
 transit (SECD s e (DUM :. c) d) = SECD s (OMEGA :. e) c d
 transit (SECD ((c' :. (OMEGA :. e')) :. v :. s) (OMEGA :. e) (RAP :. c) d) =
     SECD Nil (gencirc (OMEGA :. e') v)  c' (s :. e :. c :. d)
 
--- closure tag ver.
---   ( ((:clos |c'| . |e'|) v . s) (nil . e) (:RAP . c) d -> nil |e''| |c'| (s e c . d) where |e''| = (rplaca |e'| v))
 transit m@(SECD ((CLOS (c' :. (OMEGA :. e'))) :. v :. s) (OMEGA :. e) (RAP :. c) d) = 
     SECD Nil (gencirc (OMEGA :. e') v) c' (s :. e :. c :. d)
 
 -- Continuation
 -- Note. Order is important.
--- transit (SECD s e (LDCT c' :. c) d) = SECD (((CONT s :. e :. c' :. d) :. Nil) :. s) e c d
--- transit (SECD ((CONT s :. e :. c :. d) :. (v :. Nil) :. s') e' (AP :. c') d') =
---     SECD (v :. s) e c d
--- good ver.
 transit (SECD s e (LDCT c' :. c) d) = SECD (((CONT (s :. e :. c' :. d)) :. Nil) :. s) e c d
-transit (SECD ((CONT (s :. e :. c :. d)) :. (v :. Nil) :. s') e' (AP :. c') d') =
-    SECD (v :. s) e c d
-
+transit (SECD ((CONT (s :. e :. c :. d)) :. (v :. Nil) :. s') e' (AP :. c') d') = SECD (v :. s) e c d
 
 -- Procedure call
--- transit (SECD s e (LDF f :. c) d) = SECD ((f :. e) :. s) e c d
--- transit (SECD ((c' :. e') :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
-
--- clos ver
 transit (SECD s e (LDF f :. c) d) = SECD ((CLOS (f :. e)) :. s) e c d
 transit (SECD ((CLOS (c' :. e')) :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
-
 transit (SECD ((c' :. e') :. v :. s) e (TAP :. c) d) = SECD s (v :. e') c' d
 
 -- Base case
