@@ -64,11 +64,13 @@ data LispVal = Atom String
              | OMEGA
              | OP String -- BuiltIn Operator
              | TAP -- Tail apply
-             | LDCT LispVal -- continuation
-             -- | CONT LispVal
+             | LDCT Code -- continuation
              | CONT SECD -- Continuation
-             | CLOS LispVal LispVal -- Closure; code environment
+             | CLOS Code LispVal -- Closure; code environment
                deriving (Eq, Show)
+
+type Code = LispVal -- compiled code
+
 
 infixr 0 :.
 
@@ -142,7 +144,6 @@ showLispVal RTN = "RTN"
 showLispVal CONS = "CONS"
 showLispVal (LD (l, n)) = "LD " ++ show (l, n)
 showLispVal (LDCT x) = "LDCT " ++ showLispVal x
--- showLispVal (CONT x) = "CONT " ++ showLispVal x
 showLispVal (CONT x) = "CONT " ++ show x
 showLispVal x = show x
 
@@ -387,8 +388,6 @@ transit m@(SECD (CLOS c' (OMEGA :. e') :. v :. s) (OMEGA :. e) (RAP :. c) d) =
 
 -- Continuation
 -- Note. Order is important.
--- transit (SECD s e (LDCT c' :. c) d) = SECD ((CONT (s :. e :. c' :. d) :. Nil) :. s) e c d
--- transit (SECD (CONT (s :. e :. c :. d) :. (v :. Nil) :. s') e' (AP :. c') d') = SECD (v :. s) e c d
 transit (SECD s e (LDCT c' :. c) d) = SECD ((CONT (SECD s e c' d) :. Nil) :. s) e c d
 transit (SECD (CONT (SECD s e c d) :. (v :. Nil) :. s') e' (AP :. c') d') = SECD (v :. s) e c d
 
