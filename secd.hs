@@ -66,6 +66,7 @@ data LispVal = Atom String
              | TAP -- Tail apply
              | LDCT LispVal -- continuation
              | CONT LispVal
+             | CLOS LispVal
                deriving (Eq, Show)
 
 infixr 0 :.
@@ -314,7 +315,7 @@ comp' (Atom "letrec" :. bindings :. body) env c =
 -- comp' (Atom "call/cc" :. proc :. Nil) env (RTN :. Nil) =
 --     LDCT :. (RTN :. Nil) :. (comp' proc env (TAP :. Nil))
 comp' (Atom "call/cc" :. proc :. Nil) env c =
-    LDCT c :. (comp' proc env (AP :. c))
+    LDCT c :. comp' proc env (AP :. c)
 
 -- procedure call
 -- (f) => NIL f' AP
@@ -329,9 +330,9 @@ comp' (f :. es) env c
 -- now optimize tail call; ugly
 opt :: LispVal -> LispVal
 opt Nil = Nil
-opt (AP :. RTN :. x) = TAP :. (opt x)
-opt (LDF f :. x) = LDF (opt f) :. (opt x)
-opt (LDC x :. y) = LDC (opt x) :. (opt y)
+opt (AP :. RTN :. x) = TAP :. opt x
+opt (LDF f :. x) = LDF (opt f) :. opt x
+opt (LDC x :. y) = LDC (opt x) :. opt y
 opt (a :. b) = opt a :. opt b
 opt x = x
 
@@ -377,31 +378,39 @@ transit (SECD (_ :. s) e (ATOM :. c) d) = SECD (Bool False :. s) e c d
 transit (SECD s e (DUM :. c) d) = SECD s (OMEGA :. e) c d
 transit (SECD ((c' :. (OMEGA :. e')) :. v :. s) (OMEGA :. e) (RAP :. c) d) =
     SECD Nil (gencirc (OMEGA :. e') v)  c' (s :. e :. c :. d)
+
+-- closure tag ver.
+--   ( ((:clos |c'| . |e'|) v . s) (nil . e) (:RAP . c) d -> nil |e''| |c'| (s e c . d) where |e''| = (rplaca |e'| v))
+transit m@(SECD ((CLOS (c' :. (OMEGA :. e'))) :. v :. s) (OMEGA :. e) (RAP :. c) d) = 
+    SECD Nil (gencirc (OMEGA :. e') v) c' (s :. e :. c :. d)
+
 -- Continuation
---   ( s e (:LDCT |c'| . c) d                      -> ( ((:cont s e |c'| . d)) . s) e c d )
--- ( ((:cont s e c . d) (v) . |s'|) |e'| (:AP . |c'|) |d'| -> (v . s) e c d)
-
--- pass, but AP fails
--- transit (SECD s e (LDCT c' :. c) d) = SECD (((s :. e :. c' :. d) :. Nil) :. s) e c d
--- transit (SECD (((s :. e :. c :. d)) :. (v :. Nil) :. s') e' (AP :. c') d') =
+-- Note. Order is important.
+-- transit (SECD s e (LDCT c' :. c) d) = SECD (((CONT s :. e :. c' :. d) :. Nil) :. s) e c d
+-- transit (SECD ((CONT s :. e :. c :. d) :. (v :. Nil) :. s') e' (AP :. c') d') =
 --     SECD (v :. s) e c d
-
-transit (SECD s e (LDCT c' :. c) d) = SECD (((CONT s :. e :. c' :. d) :. Nil) :. s) e c d
-transit (SECD (((CONT s :. e :. c :. d)) :. (v :. Nil) :. s') e' (AP :. c') d') =
+-- good ver.
+transit (SECD s e (LDCT c' :. c) d) = SECD (((CONT (s :. e :. c' :. d)) :. Nil) :. s) e c d
+transit (SECD ((CONT (s :. e :. c :. d)) :. (v :. Nil) :. s') e' (AP :. c') d') =
     SECD (v :. s) e c d
 
-transit (SECD ((c' :. e') :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
 
 -- Procedure call
-transit (SECD s e (LDF f :. c) d) = SECD ((f :. e) :. s) e c d
+-- transit (SECD s e (LDF f :. c) d) = SECD ((f :. e) :. s) e c d
+-- transit (SECD ((c' :. e') :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
+
+-- clos ver
+transit (SECD s e (LDF f :. c) d) = SECD ((CLOS (f :. e)) :. s) e c d
+transit (SECD ((CLOS (c' :. e')) :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
+
 transit (SECD ((c' :. e') :. v :. s) e (TAP :. c) d) = SECD s (v :. e') c' d
 
 -- Base case
-transit (SECD s e c d) = error ("transit base case: " ++ show (car c))
+transit m@(SECD s e c d) = error ("transit base case: " ++ show (car c) ++ "\n" ++ show m ++ "\n")
 
 gencirc e' v = mapcar f v :. gencirc e' v
     where
-      f (en :. (OMEGA :. e)) = en :. gencirc e' v
+      f (CLOS (f :. (OMEGA :. e))) = CLOS (f :. gencirc e' v)
       f x = x
 
 -- for debug
