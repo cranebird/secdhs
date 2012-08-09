@@ -10,6 +10,7 @@
 
 module Main where
 import System.Environment
+import Control.Monad
 import Text.ParserCombinators.Parsec hiding (spaces)
 import IO hiding (try)
 import Test.HUnit
@@ -52,7 +53,7 @@ data LispVal = Atom String
              | STOP
              | JOIN
              | SEL
-             | LDF LispVal
+             | LDF Code
              | AP
              | CONS
              | CAR
@@ -403,17 +404,14 @@ transit m@(SECD (CLOS c' (OMEGA :. e') :. v :. s) (OMEGA :. e) (RAP :. c) d) =
     SECD Nil (gencirc (OMEGA :. e') v) c' (s :. e :. c :. d)
 
 -- Continuation
--- Note. Order is important.
 transit (SECD s e (LDCT c' :. c) d) = SECD ((CONT (SECD s e c' d) :. Nil) :. s) e c d
 transit (SECD (CONT (SECD s e c d) :. (v :. Nil) :. s') e' (AP :. c') d') = SECD (v :. s) e c d
+transit (SECD (CONT (SECD s e c d) :. (v :. Nil) :. s') e' (TAP :. c') d') = SECD (v :. s) e c d
 
 -- Procedure call
 transit (SECD s e (LDF f :. c) d) = SECD (CLOS f e :. s) e c d
---transit (SECD (CLOS c' e' :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
 transit (SECD (CLOS c' e' :. v :. s) e (AP :. c) d) = SECD Nil (extendEnv e' v) c' (s :. e :. c :. d)
-
---transit (SECD ((c' :. e') :. v :. s) e (TAP :. c) d) = SECD s (v :. e') c' d
-transit (SECD ((c' :. e') :. v :. s) e (TAP :. c) d) = SECD s (extendEnv e' v) c' d
+transit (SECD (CLOS c' e' :. v :. s) e (TAP :. Nil) d) = SECD s (extendEnv e' v) c' d
 
 transit (SECD (x :. _) e' (RTN :. _) (s :. e :. c :. d)) = SECD (x :. s) e c d
 
@@ -447,8 +445,8 @@ exec c = iter (SECD (Atom "s") (Atom "e") c (Atom "d"))
 eval :: LispVal -> String
 eval expr = showLispVal $ car s
     where
-      -- SECD s e c d = exec (opt (comp expr))
-      SECD s e c d = exec (comp expr)
+      SECD s e c d = exec (opt (comp expr))
+      --SECD s e c d = exec (comp expr)
 
 eval' :: String -> String
 eval' = eval . read
@@ -469,11 +467,7 @@ evalAndPrint expr = evalString expr >>= putStrLn
 
 until_ pred prompt action = do
   result <- prompt
-  if pred result
-  then
-      return ()
-  else
-      action result >> until_ pred prompt action
+  unless (pred result) $ action result >> until_ pred prompt action
 
 runRepl :: IO ()
 runRepl = until_ (== "quit") (readPrompt "SECD>>> ") evalAndPrint
