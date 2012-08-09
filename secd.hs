@@ -66,11 +66,12 @@ data LispVal = Atom String
              | TAP -- Tail apply
              | LDCT Code -- continuation
              | CONT SECD -- Continuation
-             | CLOS Code LispVal -- Closure; code environment
+             | CLOS Code Env -- Closure; code environment
                deriving (Eq, Show)
 
 type Code = LispVal -- compiled code
-
+type Env = LispVal -- runtime environment
+type Env' = [[LispVal]]
 
 infixr 0 :.
 
@@ -91,6 +92,14 @@ cdr :: LispVal -> LispVal
 cdr (_ :. a) = a
 cdr x = error ("cdr Not cons: " ++ show x)
 cadr = car . cdr
+
+cons2list :: LispVal -> [LispVal]
+cons2list Nil = []
+cons2list x | isProperList x = f x
+    where
+      f Nil = []
+      f (a :. b) = a : f b
+cons2list x = error ("cons2list expect proper list, but got: " ++ show x)
 
 mapcar f lst = mapcar' f lst Nil
     where
@@ -226,7 +235,7 @@ type Insn = LispVal
 type Level = Int
 type Nth = Int
 
-type Env = [[ (LispVal, Nth) ]]
+type CEnv = [[ (LispVal, Nth) ]]
 
 -- Compile-time Env.
 -- Example: env= [ [(a, 1), (b, 2) ], [ (c, 1), (d, 2)] ]
@@ -234,7 +243,7 @@ type Env = [[ (LispVal, Nth) ]]
 -- lookup b env => (1, 2)
 -- lookup c env => (2, 1)
 
-lookupVar :: LispVal -> Env -> Maybe (Level, Nth)
+lookupVar :: LispVal -> CEnv -> Maybe (Level, Nth)
 lookupVar a = lookupVar' a 1
     where
       lookupVar' a level [] = Nothing
@@ -256,7 +265,7 @@ isBuiltin x = x `elem` ["+", "-", "*", ">", "<", "=" ]
 ----------------------------------------------------------------
 comp :: LispVal -> Insn
 comp exp = comp' exp [] STOP
-comp' :: LispVal -> Env -> Insn -> Insn
+comp' :: LispVal -> CEnv -> Insn -> Insn
 -- Nil
 comp' Nil _ c = NIL :. c
 -- Self Evaluating
@@ -286,8 +295,8 @@ comp' (Atom "lambda" :. plist :. body :. Nil) env c = LDF (compBody body (RTN :.
     where
       plistToList Nil acc = acc
       plistToList (x :. xs) acc = plistToList xs (x:acc)
-      extendEnv env = zip (reverse $ plistToList plist []) [1..] : env
-      env' = extendEnv env
+      extendCEnv env = zip (reverse $ plistToList plist []) [1..] : env
+      env' = extendCEnv env
       compBody Nil acc = acc
       compBody x acc = comp' x env' acc
 
@@ -342,6 +351,14 @@ opt x = x
 lispNth 1 x = car x
 lispNth i x = lispNth (i-1) (cdr x)
 locate (i,j) e = lispNth j (lispNth i e)
+extendEnv :: LispVal -> LispVal -> LispVal
+extendEnv env lst = lst :. env
+
+locate' :: (Int,Int) -> Env' -> LispVal
+locate' (i, j) env = (env !! (i - 1)) !! (j - 1)
+
+extendEnv' :: Env' -> LispVal -> Env'
+extendEnv' env lst = env ++ [cons2list lst]
 
 -- The SECD virtual machine
 data SECD = SECD 
@@ -367,8 +384,7 @@ transit (SECD (Number a :. Number b :. s) e (OP "<" :. c) d) = SECD (Bool (a < b
 transit (SECD (Bool True :. s) e (SEL :. ct :. _ :. c) d) = SECD s e ct (c :. d)
 transit (SECD (Bool False :. s) e (SEL :. _ :. cf :. c) d) = SECD s e cf (c :. d)
 transit (SECD s e (JOIN :. _) (c :. d)) = SECD s e c d
-
-transit (SECD (x :. _) e' (RTN :. _) (s :. e :. c :. d)) = SECD (x :. s) e c d
+--
 transit (SECD s e (LD (i, j) :. c) d) = SECD (locate (i, j) e :. s) e c d
 
 -- Cons
@@ -380,8 +396,8 @@ transit (SECD (_ :. s) e (ATOM :. c) d) = SECD (Bool False :. s) e c d
 
 -- Recursion
 transit (SECD s e (DUM :. c) d) = SECD s (OMEGA :. e) c d
-transit (SECD ((c' :. (OMEGA :. e')) :. v :. s) (OMEGA :. e) (RAP :. c) d) =
-    SECD Nil (gencirc (OMEGA :. e') v)  c' (s :. e :. c :. d)
+-- transit (SECD ((c' :. (OMEGA :. e')) :. v :. s) (OMEGA :. e) (RAP :. c) d) =
+--     SECD Nil (gencirc (OMEGA :. e') v)  c' (s :. e :. c :. d)
 
 transit m@(SECD (CLOS c' (OMEGA :. e') :. v :. s) (OMEGA :. e) (RAP :. c) d) = 
     SECD Nil (gencirc (OMEGA :. e') v) c' (s :. e :. c :. d)
@@ -393,9 +409,13 @@ transit (SECD (CONT (SECD s e c d) :. (v :. Nil) :. s') e' (AP :. c') d') = SECD
 
 -- Procedure call
 transit (SECD s e (LDF f :. c) d) = SECD (CLOS f e :. s) e c d
-transit (SECD (CLOS c' e' :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
+--transit (SECD (CLOS c' e' :. v :. s) e (AP :. c) d) = SECD Nil (v :. e') c' (s :. e :. c :. d)
+transit (SECD (CLOS c' e' :. v :. s) e (AP :. c) d) = SECD Nil (extendEnv e' v) c' (s :. e :. c :. d)
 
-transit (SECD ((c' :. e') :. v :. s) e (TAP :. c) d) = SECD s (v :. e') c' d
+--transit (SECD ((c' :. e') :. v :. s) e (TAP :. c) d) = SECD s (v :. e') c' d
+transit (SECD ((c' :. e') :. v :. s) e (TAP :. c) d) = SECD s (extendEnv e' v) c' d
+
+transit (SECD (x :. _) e' (RTN :. _) (s :. e :. c :. d)) = SECD (x :. s) e c d
 
 -- Base case
 transit m@(SECD s e c d) = error ("transit base case: " ++ show (car c) ++ "\n" ++ show m ++ "\n")
@@ -418,6 +438,11 @@ exec c = iter (SECD (Atom "s") (Atom "e") c (Atom "d"))
       iter (SECD s e STOP d) = SECD s e STOP d
       iter (SECD s e (STOP :. c) d) = SECD s e c d
       iter (SECD s e c d) = iter (transit (SECD s e c d))
+-- exec c = iter (SECD (Atom "s") (Atom "e") c (Atom "d"))
+--     where
+--       iter (SECD s e STOP d) = SECD s e STOP d
+--       iter (SECD s e (STOP :. c) d) = SECD s e c d
+--       iter (SECD s e c d) = iter (transit (SECD s e c d))
 
 eval :: LispVal -> String
 eval expr = showLispVal $ car s
