@@ -397,10 +397,7 @@ transit (SECD (_ :. s) e (ATOM :. c) d) = SECD (Bool False :. s) e c d
 
 -- Recursion
 transit (SECD s e (DUM :. c) d) = SECD s (OMEGA :. e) c d
--- transit (SECD ((c' :. (OMEGA :. e')) :. v :. s) (OMEGA :. e) (RAP :. c) d) =
---     SECD Nil (gencirc (OMEGA :. e') v)  c' (s :. e :. c :. d)
-
-transit m@(SECD (CLOS c' (OMEGA :. e') :. v :. s) (OMEGA :. e) (RAP :. c) d) = 
+transit (SECD (CLOS c' (OMEGA :. e') :. v :. s) (OMEGA :. e) (RAP :. c) d) = 
     SECD Nil (gencirc (OMEGA :. e') v) c' (s :. e :. c :. d)
 
 -- Continuation
