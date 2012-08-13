@@ -17,6 +17,8 @@ import Test.HUnit
 import Criterion
 import Criterion.Main
 
+import Control.Parallel
+
 import Debug.Trace
 
 instance Show (a -> b)
@@ -369,12 +371,13 @@ locate (i,j) e = lispNth j (lispNth i e)
 --
 updateEnv :: (Int, Int) -> LispVal -> LispVal -> LispVal
 --updateEnv (i,j) e v = undefined
-updateEnv (0, j) (a :. b) v = (updateCons j a b) :. b
-updateEnv (i, j) (a :. b) v = a :. (updateEnv ((i - 1),j) b v)
+updateEnv (1, j) (a :. b) v = updateCons j a v :. b
+updateEnv (i, j) (a :. b) v = a :. updateEnv (i - 1, j) b v
+updateEnv (i, j) e v = error ("updateEnv e=" ++ show e ++ "(i,j)=" ++ show (i, j) ++ "\nv=" ++ show v)
 
 updateCons :: Int -> LispVal -> LispVal -> LispVal
-updateCons 0 (a :. b) v = v :. b
-updateCons n (a :. b) v = a :. (updateCons (n - 1) b v)
+updateCons 1 (a :. b) v = v :. b
+updateCons n (a :. b) v = a :. updateCons (n - 1) b v
 
 extendEnv :: LispVal -> LispVal -> LispVal
 extendEnv env lst = lst :. env
@@ -412,9 +415,8 @@ transit (SECD s e (JOIN :. _) (c :. d)) = SECD s e c d
 -- LD
 transit (SECD s e (LD (i, j) :. c) d) = SECD (locate (i, j) e :. s) e c d
 -- SET
--- ( (x . s) e (:SET (m . n) . c) d -> s |e'| c d where |e'| = (progn (setf (locate m n e) x) e))
 transit (SECD (x :. s) e (SET (i, j) :. c) d) = SECD s e' c d
-    where e' = updateEnv (i,j) e x
+    where e' = updateEnv (i, j) e x
 
 -- Cons
 transit (SECD (a :. b :. s) e (CONS :. c) d) = SECD ((a :. b) :. s) e c d
@@ -478,6 +480,11 @@ eval expr = showLispVal $ car s
 eval' :: String -> String
 eval' = eval . read
 
+evalD :: LispVal -> String
+evalD expr = showLispVal $ car s
+    where
+      SECD s e c d = exec' (opt (comp expr))
+evalD' = evalD . read
 
 -- Simple REPL
 -- See "Write Yourself a Scheme in 48 Hours"
@@ -584,7 +591,18 @@ testeval = test [
             "cont" ~: "call/cc-4" ~: "9" ~=? eval' "(* 3 (call/cc (lambda (k) (+ 1 2))))",
             "cont" ~: "call/cc-5" ~: "6" ~=? eval' "(* 3 (call/cc (lambda (k) (+ 1 (k 2)))))",
             "cont" ~: "paip-1" ~: "321" ~=? eval' "(+ 1 (call/cc (lambda (cc) (+ 20 300))))",
-            "cont" ~: "paip-2" ~: "301" ~=? eval' "(+ 1 (call/cc (lambda (cc) (+ 20 (cc 300)))))"
+            "cont" ~: "paip-2" ~: "301" ~=? eval' "(+ 1 (call/cc (lambda (cc) (+ 20 (cc 300)))))",
+            "begin" ~: "begin1" ~: "13" ~=? eval' "(begin 13)",
+            "begin" ~: "begin2" ~: "14" ~=? eval' "(begin 7 14)",
+            "begin" ~: "begin2" ~: "15" ~=? eval' "(begin (+ 10 5))",
+            -- fixme '(begin -1 (* 2 8))
+            "begin" ~: "begin2" ~: "17" ~=? eval' "(begin 1 3 5 7 (+ 7 (* 2 5)))",
+            -- fixme '(begin (+ (- 9 1) (* 2 5)))
+            "set" ~: "set1" ~: "5" ~=? eval' "(let ((x 2)) (set! x 4) (+ x 1))",
+            "set" ~: "set2" ~: "9" ~=? eval' "(let ((x 10)) (set! x 9) x)",
+            "set" ~: "set3" ~: "15" ~=? eval' "(let ((x 3) (y 7)) (set! x 15) (set! y 9) x)",
+            "set" ~: "set4" ~: "3" ~=? eval' "(let ((x 3) (y 8)) (let ((z (+ x y))) (set! z 99) x))",
+            "set" ~: "set5" ~: "4" ~=? eval' "(let ((n 0)) (let ((fn (lambda () (set! n (+ n 1)) n))) (fn) (fn) (fn) (fn)))"
            ]
 
 tests = test [
