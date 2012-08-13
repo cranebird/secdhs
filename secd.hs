@@ -68,6 +68,7 @@ data LispVal = Atom String
              | LDCT Code -- continuation
              | CONT SECD -- Continuation
              | CLOS Code Env -- Closure; code environment
+             | SET (Level, Nth)
                deriving (Eq, Show)
 
 type Code = LispVal -- compiled code
@@ -235,10 +236,8 @@ instance Read LispVal where
 type Insn = LispVal
 type Level = Int
 type Nth = Int
-
-type CEnv = [[ (LispVal, Nth) ]]
-
 -- Compile-time Env.
+type CEnv = [[ (LispVal, Nth) ]]
 -- Example: env= [ [(a, 1), (b, 2) ], [ (c, 1), (d, 2)] ]
 -- lookup a env => (1, 1) (level, nth)
 -- lookup b env => (1, 2)
@@ -264,6 +263,7 @@ isBuiltin x = x `elem` ["+", "-", "*", ">", "<", "=" ]
 ----------------------------------------------------------------
 -- Compiler
 ----------------------------------------------------------------
+-- The SECD virtual machine
 comp :: LispVal -> Insn
 comp exp = comp' exp [] STOP
 comp' :: LispVal -> CEnv -> Insn -> Insn
@@ -292,14 +292,23 @@ comp' (Atom op :. x :. y :. Nil) env c | isBuiltin op =
 comp' (Atom "if" :. e :. et :. ef :. Nil) env c =
     comp' e env (SEL :. comp' et env (JOIN :. Nil) :. comp' ef env (JOIN :. Nil) :. c)
 -- Nonrecursive Functions
-comp' (Atom "lambda" :. plist :. body :. Nil) env c = LDF (compBody body (RTN :. Nil)) :. c
+comp' (Atom "lambda" :. plist :. body) env c = LDF (compBody body (RTN :. Nil)) :. c
     where
       plistToList Nil acc = acc
       plistToList (x :. xs) acc = plistToList xs (x:acc)
       extendCEnv env = zip (reverse $ plistToList plist []) [1..] : env
       env' = extendCEnv env
+      compBody (a :. b) acc = comp' a env' (compBody b acc)
       compBody Nil acc = acc
-      compBody x acc = comp' x env' acc
+
+-- comp' (Atom "lambda" :. plist :. body :. Nil) env c = LDF (compBody body (RTN :. Nil)) :. c
+--     where
+--       plistToList Nil acc = acc
+--       plistToList (x :. xs) acc = plistToList xs (x:acc)
+--       extendCEnv env = zip (reverse $ plistToList plist []) [1..] : env
+--       env' = extendCEnv env
+--       compBody Nil acc = acc
+--       compBody x acc = comp' x env' acc
 
 -- let
 -- (let ((x x0)) body) => ((lambda (x) body) x0)
@@ -310,8 +319,7 @@ comp' (Atom "let" :. bindings :. body) env c =
            mapcar cadr bindings) env c
 
 -- (letrec ((x x0)
---          (y y0))
---  body)
+--          (y y0)) body)
 -- =>
 -- DUM NIL y0' CONS x0' CONS LDF (body' RTN) RAP
 comp' (Atom "letrec" :. bindings :. body) env c = 
@@ -328,10 +336,24 @@ comp' (Atom "letrec" :. bindings :. body) env c =
 -- comp' (Atom "call/cc" :. proc :. Nil) env (RTN :. Nil) =
 --     LDCT :. (RTN :. Nil) :. (comp' proc env (TAP :. Nil))
 comp' (Atom "call/cc" :. proc :. Nil) env c = LDCT c :. comp' proc env (AP :. c)
-
+-- set!
+comp' (Atom "set!" :. Atom var :. exp :. Nil) env c =
+    comp' exp env (SET location :. LDC (Bool False) :. c)
+        where
+          location = case lookupVar (Atom var) env of
+                       Just (level, nth) -> (level, nth)
+                       Nothing -> error ("var " ++ var ++ " not found")
+-- begin
+comp' (Atom "begin" :. exp) env c
+    | isProperList exp = f exp env c
+    where
+      f Nil env c = c
+      f (a :. b) env c = comp' a env (f b env c)
+                                      
 -- procedure call
 -- (f) => NIL f' AP
 -- (f e1 e2) => NIL e2' CONS e1' CONS f' AP
+-- fixme 記述順によらない書き方にすること
 comp' (f :. es) env c
     | isProperList es = NIL :. args2cons es (comp' f env (AP :. c))
     where
@@ -352,11 +374,22 @@ opt x = x
 lispNth 1 x = car x
 lispNth i x = lispNth (i-1) (cdr x)
 locate (i,j) e = lispNth j (lispNth i e)
+
+--
+updateEnv :: (Int, Int) -> LispVal -> LispVal -> LispVal
+--updateEnv (i,j) e v = undefined
+updateEnv (0, j) (a :. b) v = (updateCons j a b) :. b
+updateEnv (i, j) (a :. b) v = a :. (updateEnv ((i - 1),j) b v)
+
+updateCons :: Int -> LispVal -> LispVal -> LispVal
+updateCons 0 (a :. b) v = v :. b
+updateCons n (a :. b) v = a :. (updateCons (n - 1) b v)
+
 extendEnv :: LispVal -> LispVal -> LispVal
 extendEnv env lst = lst :. env
 
-locate' :: (Int,Int) -> Env' -> LispVal
-locate' (i, j) env = (env !! (i - 1)) !! (j - 1)
+-- locate' :: (Int,Int) -> Env' -> LispVal
+-- locate' (i, j) env = (env !! (i - 1)) !! (j - 1)
 
 extendEnv' :: Env' -> LispVal -> Env'
 extendEnv' env lst = env ++ [cons2list lst]
@@ -374,7 +407,7 @@ transit :: SECD -> SECD
 
 transit (SECD s e (LDC x :. c) d) = SECD (x :. s) e c d
 transit (SECD s e (NIL :. c) d) = SECD (Nil :. s) e c d
--- Ptimitive
+-- Primitive
 transit (SECD (Number a :. Number b :. s) e (OP "=" :. c) d) = SECD (Bool (a == b) :. s) e c d
 transit (SECD (Number a :. Number b :. s) e (OP "+" :. c) d) = SECD (Number (a + b) :. s) e c d
 transit (SECD (Number a :. Number b :. s) e (OP "-" :. c) d) = SECD (Number (a - b) :. s) e c d
@@ -385,8 +418,12 @@ transit (SECD (Number a :. Number b :. s) e (OP "<" :. c) d) = SECD (Bool (a < b
 transit (SECD (Bool True :. s) e (SEL :. ct :. _ :. c) d) = SECD s e ct (c :. d)
 transit (SECD (Bool False :. s) e (SEL :. _ :. cf :. c) d) = SECD s e cf (c :. d)
 transit (SECD s e (JOIN :. _) (c :. d)) = SECD s e c d
---
+-- LD
 transit (SECD s e (LD (i, j) :. c) d) = SECD (locate (i, j) e :. s) e c d
+-- SET
+-- ( (x . s) e (:SET (m . n) . c) d -> s |e'| c d where |e'| = (progn (setf (locate m n e) x) e))
+transit (SECD (x :. s) e (SET (i, j) :. c) d) = SECD s e' c d
+    where e' = updateEnv (i,j) e x
 
 -- Cons
 transit (SECD (a :. b :. s) e (CONS :. c) d) = SECD ((a :. b) :. s) e c d
@@ -402,6 +439,7 @@ transit (SECD (CLOS c' (OMEGA :. e') :. v :. s) (OMEGA :. e) (RAP :. c) d) =
 
 -- Continuation
 transit (SECD s e (LDCT c' :. c) d) = SECD ((CONT (SECD s e c' d) :. Nil) :. s) e c d
+-- AP, TAP
 transit (SECD (CONT (SECD s e c d) :. (v :. Nil) :. s') e' (AP :. c') d') = SECD (v :. s) e c d
 transit (SECD (CONT (SECD s e c d) :. (v :. Nil) :. s') e' (TAP :. c') d') = SECD (v :. s) e c d
 
@@ -422,7 +460,7 @@ gencirc e' v = mapcar f v :. gencirc e' v
 
 -- for debug
 -- Be care to use for circular structure.
-transit' (SECD s e c d) = trace ("S:"++ showLispVal s ++ 
+transit' (SECD s e c d) = trace ("====\nS:"++ showLispVal s ++ 
                                  "\nE:" ++ showLispVal e ++
                                  "\nC:" ++ showLispVal c ++
                                  "\nD:" ++ showLispVal d)
@@ -433,11 +471,12 @@ exec c = iter (SECD (Atom "s") (Atom "e") c (Atom "d"))
       iter (SECD s e STOP d) = SECD s e STOP d
       iter (SECD s e (STOP :. c) d) = SECD s e c d
       iter (SECD s e c d) = iter (transit (SECD s e c d))
--- exec c = iter (SECD (Atom "s") (Atom "e") c (Atom "d"))
---     where
---       iter (SECD s e STOP d) = SECD s e STOP d
---       iter (SECD s e (STOP :. c) d) = SECD s e c d
---       iter (SECD s e c d) = iter (transit (SECD s e c d))
+
+exec' c = iter (SECD (Atom "s") (Atom "e") c (Atom "d"))
+    where
+      iter (SECD s e STOP d) = SECD s e STOP d
+      iter (SECD s e (STOP :. c) d) = SECD s e c d
+      iter (SECD s e c d) = iter (transit' (SECD s e c d))
 
 eval :: LispVal -> String
 eval expr = showLispVal $ car s
@@ -447,6 +486,7 @@ eval expr = showLispVal $ car s
 
 eval' :: String -> String
 eval' = eval . read
+
 
 -- Simple REPL
 -- See "Write Yourself a Scheme in 48 Hours"
@@ -491,6 +531,7 @@ main = runRepl
 -- runTestTT tests
 -- runTestTT testeval
 ----------------------------------------------------------------
+
 testeval = test [
             -- simple
             "e1" ~: "num" ~: "3" ~=? eval' "3",
@@ -550,8 +591,9 @@ testeval = test [
             "cont" ~: "call/cc-2" ~: "15" ~=? eval' "((lambda (n) (+ n (call/cc (lambda (c) (c 2))))) 13)",
             "cont" ~: "call/cc-3" ~: "2" ~=? eval' "((lambda (n) (call/cc (lambda (c) (+ n (c 2))))) 13)",
             "cont" ~: "call/cc-4" ~: "9" ~=? eval' "(* 3 (call/cc (lambda (k) (+ 1 2))))",
-            "cont" ~: "call/cc-5" ~: "6" ~=? eval' "(* 3 (call/cc (lambda (k) (+ 1 (k 2)))))"
-
+            "cont" ~: "call/cc-5" ~: "6" ~=? eval' "(* 3 (call/cc (lambda (k) (+ 1 (k 2)))))",
+            "cont" ~: "paip-1" ~: "321" ~=? eval' "(+ 1 (call/cc (lambda (cc) (+ 20 300))))",
+            "cont" ~: "paip-2" ~: "301" ~=? eval' "(+ 1 (call/cc (lambda (cc) (+ 20 (cc 300)))))"
            ]
 
 tests = test [
@@ -595,3 +637,4 @@ tests = test [
 
         ]
 
+----
