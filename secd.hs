@@ -301,15 +301,6 @@ comp' (Atom "lambda" :. plist :. body) env c = LDF (compBody body (RTN :. Nil)) 
       compBody (a :. b) acc = comp' a env' (compBody b acc)
       compBody Nil acc = acc
 
--- comp' (Atom "lambda" :. plist :. body :. Nil) env c = LDF (compBody body (RTN :. Nil)) :. c
---     where
---       plistToList Nil acc = acc
---       plistToList (x :. xs) acc = plistToList xs (x:acc)
---       extendCEnv env = zip (reverse $ plistToList plist []) [1..] : env
---       env' = extendCEnv env
---       compBody Nil acc = acc
---       compBody x acc = comp' x env' acc
-
 -- let
 -- (let ((x x0)) body) => ((lambda (x) body) x0)
 -- (let ((x x0) (y y0)) body) => ((lambda (x y) body) x0 y0)
